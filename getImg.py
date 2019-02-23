@@ -9,6 +9,7 @@ import cv2
 import skimage
 import skimage.io
 import numpy as np
+import time
 
 #  Hart Mill Farm , 447222.0 , 534550.0
 # 027C806B-3BF0-4D10-B55A-B77337313780 , Hart Mill Farm , 447222.0 , 534550.0
@@ -17,18 +18,35 @@ import numpy as np
 IMG_EXTRACT_SIZE = 50  # pixels
 CACHEDIR = "/home/graham/Farms/TileCache"
 
+# Google info from https://geogeek.xyz/how-to-add-google-maps-layers-in-qgis-3.html
 tileSeries = {
   "OS_6in_1st" : {
-    "url": "https://nls-3.tileserver.com/fpsUZbULUtp1/%d/%d/%d.jpg"
+    "url": "https://nls-3.tileserver.com/fpsUZbULUtp1/{0}/{1}/{2}.jpg"
   },
   "OS_1in_7th" : {
-    "url": "https://nls-3.tileserver.com/fpsUZbc4ftb2/%d/%d/%d.jpg"
+    "url": "https://nls-3.tileserver.com/fpsUZbc4ftb2/{0}/{1}/{2}.jpg",
+    "dates" : "1955-1961"
+  },
+  "OS_10k" : {
+    "url": "https://geo.nls.uk/mapdata3/os/10knationalgrid/{0}/{1}/{2}.png",
+    "dates": "1950-1967"
+  },
+  "OS_10k_1900" : {
+    "url": "https://nls-3.tileserver.com/fpsUZbqQLWLT/{0}/{1}/{2}.jpg",
+    "dates": "1900s"
   },
   "OS_25k" : {
-    "url": "https://nls-3.tileserver.com/fpsUZbIoj0Oa/%d/%d/%d.jpg"
+    "url": "https://nls-3.tileserver.com/fpsUZbIoj0Oa/{0}/{1}/{2}.jpg",
+    "dates": "1937-1961"
   },
   "OSM" : {
-    "url": "http://c.tile.openstreetmap.org/%d/%d/%d.png"
+    "url": "http://c.tile.openstreetmap.org/{0}/{1}/{2}.png"
+  },
+  "Google" : {
+    "url": "https://mt1.google.com/vt/lyrs=r&x={1}&y={2}&z={0}"
+  },
+  "Google-Satellite" : {
+    "url": "http://www.google.cn/maps/vt?lyrs=s@189&gl=cn&x={1}&y={2}&z={0}"
   },
 }
 def latlon2tilexy(lat_deg, lon_deg, zoom):
@@ -67,7 +85,8 @@ def osgb2latlon(osgb_n,osgb_e):
 
 def getTileUrl(seriesStr,x,y,z):
   if (seriesStr in tileSeries):
-    url = tileSeries[seriesStr]['url'] % (z, x, y)
+    #url = tileSeries[seriesStr]['url'] % (z, x, y)
+    url = tileSeries[seriesStr]['url'].format(z, x, y)
   else:
     print("Unrecognised Series %s." % seriesStr)
     url = "error"
@@ -89,12 +108,18 @@ def downloadTile(seriesStr,x,y,z):
   map series at mercator coordinates x,y and zoom level z.
   """
   url = getTileUrl(seriesStr,x,y,z)
-  print("downloadTile() - url=%s" % url);
-  imgRGB = skimage.io.imread(url)
-  img = cv2.cvtColor(imgRGB,cv2.COLOR_BGR2RGB)
-  #cv2.imshow("original",imgRGB)
-  #cv2.imshow("corrected",img)
-  #cv2.waitKey(0)
+  #print("downloadTile() - url=%s" % url);
+  try:
+    img_in = skimage.io.imread(url)
+    if (len(img_in.shape)<3):
+      img = cv2.cvtColor(img_in,cv2.COLOR_GRAY2RGB)
+    else:
+      img = cv2.cvtColor(img_in,cv2.COLOR_BGR2RGB)
+    #cv2.imshow("original",imgRGB)
+    #cv2.imshow("corrected",img)
+    #cv2.waitKey(0)
+  except:
+    img = None
   return img
 
 
@@ -105,15 +130,18 @@ def getTile(seriesStr,x,y,z):
   """
   fpath = getTileFname(seriesStr,x,y,z)
   if (not os.path.exists(fpath)):
-    print("getTile - downloading tile into cache")
-    img = downloadTile(seriesStr,x,y,z)
     path,fname = ntpath.split(fpath)
     if (not os.path.exists(path)):
       os.makedirs(path)
-    print("Writing file to %s" % fpath)
-    cv2.imwrite(fpath,img)
+    print("getTile - downloading tile %s into cache, after delay" % fpath)
+    time.sleep(0.2)
+    img = downloadTile(seriesStr,x,y,z)
+    if (img is not None):
+      cv2.imwrite(fpath,img)
+    else:
+      print("ERROR Downloading Tile %s" % fpath)
   else:
-    print("getTile - using cached version of tile from %s" % fpath)
+    #print("getTile - using cached version of tile from %s" % fpath)
     img = cv2.imread(fpath,cv2.IMREAD_UNCHANGED)
 
   return img
@@ -134,14 +162,16 @@ def getCompositeImg(seriesStr,x,y,z):
   img32 = getTile(seriesStr, x+0, y+1, z)
   img33 = getTile(seriesStr, x+1, y+1, z)
 
-  row1 = np.hstack([img11, img12, img13])
-  row2 = np.hstack([img21, img22, img23])
-  row3 = np.hstack([img31, img32, img33])
-
-  imgRGB = np.vstack([row1, row2, row3])
-  img = cv2.cvtColor(imgRGB,cv2.COLOR_BGR2RGB)
-
-  print("tilefname1 = %s" % getTileFname(seriesStr,x,y,z))
+  try:
+    row1 = np.hstack([img11, img12, img13])
+    row2 = np.hstack([img21, img22, img23])
+    row3 = np.hstack([img31, img32, img33])
+    imgRGB = np.vstack([row1, row2, row3])
+    #img = cv2.cvtColor(imgRGB,cv2.COLOR_BGR2RGB)
+    img = imgRGB
+  except:
+    print("ERROR Creating composite image")
+    img = None
   return img
 
 
@@ -156,15 +186,15 @@ def getPixelCoords(lat,lon,x,y,z):
   lat2,lon2 = tilexy2latlon(x+2,y+2,z)
 
   xfrac = (lon-lon1) / (lon2 - lon1)
-  yfrac = (lat-lat2) / (lat1 - lat2)
+  yfrac = (lat-lat1) / (lat2 - lat1)
 
   xpx = int(3 * tilex * xfrac)
   ypx = int(3 * tiley * yfrac)
 
-  print("getPixelCoords(%f,%f,%d,%d,%d)" % (lat,lon,x,y,z))
-  print("tile bounds: (%f,%f), (%f,%f)" % (lat1,lon1,lat2,lon2))
-  print("  xfrac,yfrac = %f, %f" % (xfrac,yfrac))
-  print("  xpx,ypx = %d, %d" % (xpx,ypx))
+  #print("getPixelCoords(%f,%f,%d,%d,%d)" % (lat,lon,x,y,z))
+  #print("tile bounds: (%f,%f), (%f,%f)" % (lat1,lon1,lat2,lon2))
+  #print("  xfrac,yfrac = %f, %f" % (xfrac,yfrac))
+  #print("  xpx,ypx = %d, %d" % (xpx,ypx))
 
   return (xpx,ypx)
 
@@ -178,12 +208,13 @@ def getFarmImg(seriesStr,osgb_n,osgb_e,imSize):
   x,y = latlon2tilexy(lat, lon, z)
   img = getCompositeImg(seriesStr,x,y,z)
 
-  xpx,ypx = getPixelCoords(lat,lon,x,y,z)
-
-  print(xpx,ypx)
-  cv2.imwrite("img_comp.png",img)
-  
-  img_cropped = img[(ypx-imSize):(ypx+imSize), (xpx-imSize):(xpx+imSize)]
+  if (img is not None):
+    xpx,ypx = getPixelCoords(lat,lon,x,y,z)
+    #print("Object is at %f N, %f E, which is (%f,%f) deg, or (%d, %d) pixels" % (float(osgb_n), float(osgb_e), lat,lon, ypx, xpx))
+    #cv2.imwrite("img_comp.png",img)
+    img_cropped = img[(ypx-imSize):(ypx+imSize), (xpx-imSize):(xpx+imSize)]
+  else:
+    img_cropped = None
   return img_cropped,img
 
 
@@ -191,16 +222,18 @@ def getFarmImg(seriesStr,osgb_n,osgb_e,imSize):
 if (__name__ == "__main__"):
   zoom = 16
   lon,lat = osgb2latlon(447222.0 , 534550.0)
-  print lon,lat
-  print("https://www.openstreetmap.org/?mlat=%f&mlon=%f#map=17/%f/%f" % (lat,lon,lat,lon))
+  #print lon,lat
+  #print("https://www.openstreetmap.org/?mlat=%f&mlon=%f#map=17/%f/%f" % (lat,lon,lat,lon))
 
   x,y = latlon2tilexy(lat,lon, zoom)
 
-  print("http://c.tile.openstreetmap.org/%d/%d/%d.png" % (zoom,x,y))
-  print("https://geo.nls.uk/mapdata3/os/6inchfirst/%d/%d/%d.png" % (zoom,x,y))
-  print("https://nls-3.tileserver.com/fpsUZbc4ftb2/%d/%d/%d.jpg" % (zoom,x,y))
-  print("https://nls-3.tileserver.com/fpsUZbULUtp1/%d/%d/%d.jpg" % (zoom,x,y))
+  #print("http://c.tile.openstreetmap.org/%d/%d/%d.png" % (zoom,x,y))
+  #print("https://geo.nls.uk/mapdata3/os/6inchfirst/%d/%d/%d.png" % (zoom,x,y))
+  #print("https://nls-3.tileserver.com/fpsUZbc4ftb2/%d/%d/%d.jpg" % (zoom,x,y))
+  #print("https://nls-3.tileserver.com/fpsUZbULUtp1/%d/%d/%d.jpg" % (zoom,x,y))
 
+  print(getTileUrl("Google",x,y,zoom))
+  print(getTileUrl("OSM",x,y,zoom))
   print(getTileUrl("OS_6in_1st",x,y,zoom))
 
 
@@ -210,5 +243,5 @@ if (__name__ == "__main__"):
   osgb_e = 534550.0
   imSize = 50
   seriesStr = "OS_6in_1st"
-  img, = getFarmImg(seriesStr,osgb_n,osgb_e,imSize)
+  img,img_big = getFarmImg(seriesStr,osgb_n,osgb_e,imSize)
   cv2.imwrite("img.png",img)
