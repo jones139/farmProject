@@ -4,6 +4,7 @@ import math
 import pyproj
 import urllib2
 import os
+import ntpath
 import cv2
 import skimage
 import skimage.io
@@ -14,7 +15,22 @@ import numpy as np
 # From https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames#Lon..2Flat._to_tile_numbers_2
 
 IMG_EXTRACT_SIZE = 50  # pixels
+CACHEDIR = "/home/graham/Farms/TileCache"
 
+tileSeries = {
+  "OS_6in_1st" : {
+    "url": "https://nls-3.tileserver.com/fpsUZbULUtp1/%d/%d/%d.jpg"
+  },
+  "OS_1in_7th" : {
+    "url": "https://nls-3.tileserver.com/fpsUZbc4ftb2/%d/%d/%d.jpg"
+  },
+  "OS_25k" : {
+    "url": "https://nls-3.tileserver.com/fpsUZbIoj0Oa/%d/%d/%d.jpg"
+  },
+  "OSM" : {
+    "url": "http://c.tile.openstreetmap.org/%d/%d/%d.png"
+  },
+}
 def latlon2tilexy(lat_deg, lon_deg, zoom):
   """
   Based on https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
@@ -50,49 +66,30 @@ def osgb2latlon(osgb_n,osgb_e):
     return (lon,lat)
 
 def getTileUrl(seriesStr,x,y,z):
-    if (seriesStr is "OS_6in_1st"):
-        url = "https://nls-3.tileserver.com/fpsUZbULUtp1/%d/%d/%d.jpg" % (z,x,y)
-    elif (seriesStr is "OS_1in_7th"): #1955-1961
-        url = "https://nls-3.tileserver.com/fpsUZbc4ftb2/%d/%d/%d.jpg" % (z,x,y)
-    elif (seriesStr is "OS_25k"):  # 1937-1961
-        url = "https://nls-3.tileserver.com/fpsUZbIoj0Oa/%d/%d/%d.jpg" % (z,x,y)
-    elif (seriesStr is "OSM"):
-        url = "http://c.tile.openstreetmap.org/%d/%d/%d.png" % (z,x,y)        
-    else:
-        print("Unrecognised Series %s." % seriesStr)
-        url = "error"
+  if (seriesStr in tileSeries):
+    url = tileSeries[seriesStr]['url'] % (z, x, y)
+  else:
+    print("Unrecognised Series %s." % seriesStr)
+    url = "error"
 
-    return url
+  return url
+
+
+def getTileFname(seriesStr,x,y,z):
+  """ Returns the cache filename of the specified map tile """
+  fname = os.path.join(CACHEDIR,seriesStr,str(z),str(x),"%d.png" % y)
+  return fname
         
 
-def getImg(seriesStr,x,y,z):
-  url = getTileUrl(seriesStr,x,y,z)
-  print("getImg() - url=%s" % url);
-  
-  user_agent = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64)'
-  headers = {'User-Agent': user_agent}
-  req = urllib2.Request(url,None,headers)
-  response = urllib2.urlopen(req)
-  print response.info()
-  data = response.read()
-  response.close()
-
-  #return data
-  path = os.getcwd()
-  filename = "img.jpg"
-  file_path = "%s/%s" % (path, filename)
-  print("file_path = %s" % file_path)
-  downloaded_image = file(file_path, "wb")
-  downloaded_image.write(data)
-  downloaded_image.close()
-
-
 def openImg(seriesStr,x,y,z):
+  downloadTile(seriesStr,x,y,z)
+
+def downloadTile(seriesStr,x,y,z):
   """ Returns an opencv compatible image of the tile of the given
   map series at mercator coordinates x,y and zoom level z.
   """
   url = getTileUrl(seriesStr,x,y,z)
-  print("getImg() - url=%s" % url);
+  print("downloadTile() - url=%s" % url);
   imgRGB = skimage.io.imread(url)
   img = cv2.cvtColor(imgRGB,cv2.COLOR_BGR2RGB)
   #cv2.imshow("original",imgRGB)
@@ -101,20 +98,41 @@ def openImg(seriesStr,x,y,z):
   return img
 
 
+def getTile(seriesStr,x,y,z):
+  """ Checks the local cache for the tile.  If it exists, the chached
+  version is returned.  If it is not, it is downloaded and added to the 
+  cache, then the cached version is returned.
+  """
+  fpath = getTileFname(seriesStr,x,y,z)
+  if (not os.path.exists(fpath)):
+    print("getTile - downloading tile into cache")
+    img = downloadTile(seriesStr,x,y,z)
+    path,fname = ntpath.split(fpath)
+    if (not os.path.exists(path)):
+      os.makedirs(path)
+    print("Writing file to %s" % fpath)
+    cv2.imwrite(fpath,img)
+  else:
+    print("getTile - using cached version of tile from %s" % fpath)
+    img = cv2.imread(fpath,cv2.IMREAD_UNCHANGED)
+
+  return img
+
+
 def getCompositeImg(seriesStr,x,y,z):
   """ Returns a composite image of 9 tiles in a 3x3 matrix, centred
   on x,y at zoom level z.
   """
   # Get the 9 images to make up the array.
-  img11 = skimage.io.imread(getTileUrl(seriesStr, x-1, y-1, z))
-  img12 = skimage.io.imread(getTileUrl(seriesStr, x+0, y-1, z))
-  img13 = skimage.io.imread(getTileUrl(seriesStr, x+1, y-1, z))
-  img21 = skimage.io.imread(getTileUrl(seriesStr, x-1, y+0, z))
-  img22 = skimage.io.imread(getTileUrl(seriesStr, x+0, y+0, z))
-  img23 = skimage.io.imread(getTileUrl(seriesStr, x+1, y+0, z))
-  img31 = skimage.io.imread(getTileUrl(seriesStr, x-1, y+1, z))
-  img32 = skimage.io.imread(getTileUrl(seriesStr, x+0, y+1, z))
-  img33 = skimage.io.imread(getTileUrl(seriesStr, x+1, y+1, z))
+  img11 = getTile(seriesStr, x-1, y-1, z)
+  img12 = getTile(seriesStr, x+0, y-1, z)
+  img13 = getTile(seriesStr, x+1, y-1, z)
+  img21 = getTile(seriesStr, x-1, y+0, z)
+  img22 = getTile(seriesStr, x+0, y+0, z)
+  img23 = getTile(seriesStr, x+1, y+0, z)
+  img31 = getTile(seriesStr, x-1, y+1, z)
+  img32 = getTile(seriesStr, x+0, y+1, z)
+  img33 = getTile(seriesStr, x+1, y+1, z)
 
   row1 = np.hstack([img11, img12, img13])
   row2 = np.hstack([img21, img22, img23])
@@ -123,6 +141,7 @@ def getCompositeImg(seriesStr,x,y,z):
   imgRGB = np.vstack([row1, row2, row3])
   img = cv2.cvtColor(imgRGB,cv2.COLOR_BGR2RGB)
 
+  print("tilefname1 = %s" % getTileFname(seriesStr,x,y,z))
   return img
 
 
@@ -165,31 +184,31 @@ def getFarmImg(seriesStr,osgb_n,osgb_e,imSize):
   cv2.imwrite("img_comp.png",img)
   
   img_cropped = img[(ypx-imSize):(ypx+imSize), (xpx-imSize):(xpx+imSize)]
-  return img_cropped
+  return img_cropped,img
 
 
     
-zoom = 16
-lon,lat = osgb2latlon(447222.0 , 534550.0)
-print lon,lat
-print("https://www.openstreetmap.org/?mlat=%f&mlon=%f#map=17/%f/%f" % (lat,lon,lat,lon))
+if (__name__ == "__main__"):
+  zoom = 16
+  lon,lat = osgb2latlon(447222.0 , 534550.0)
+  print lon,lat
+  print("https://www.openstreetmap.org/?mlat=%f&mlon=%f#map=17/%f/%f" % (lat,lon,lat,lon))
 
-x,y = latlon2tilexy(lat,lon, zoom)
+  x,y = latlon2tilexy(lat,lon, zoom)
 
-print("http://c.tile.openstreetmap.org/%d/%d/%d.png" % (zoom,x,y))
-print("https://geo.nls.uk/mapdata3/os/6inchfirst/%d/%d/%d.png" % (zoom,x,y))
-print("https://nls-3.tileserver.com/fpsUZbc4ftb2/%d/%d/%d.jpg" % (zoom,x,y))
-print("https://nls-3.tileserver.com/fpsUZbULUtp1/%d/%d/%d.jpg" % (zoom,x,y))
+  print("http://c.tile.openstreetmap.org/%d/%d/%d.png" % (zoom,x,y))
+  print("https://geo.nls.uk/mapdata3/os/6inchfirst/%d/%d/%d.png" % (zoom,x,y))
+  print("https://nls-3.tileserver.com/fpsUZbc4ftb2/%d/%d/%d.jpg" % (zoom,x,y))
+  print("https://nls-3.tileserver.com/fpsUZbULUtp1/%d/%d/%d.jpg" % (zoom,x,y))
 
-print(getTileUrl("OS_6in_1st",x,y,zoom))
+  print(getTileUrl("OS_6in_1st",x,y,zoom))
 
-#imgData =  getImg("OS_6in_1st",x,y,zoom)
 
-#openImg("OS_6in_1st",x,y,zoom)
+  #openImg("OS_6in_1st",x,y,zoom)
 
-osgb_n = 447222.0
-osgb_e = 534550.0
-imSize = 50
-seriesStr = "OS_6in_1st"
-img = getFarmImg(seriesStr,osgb_n,osgb_e,imSize)
-cv2.imwrite("img.png",img)
+  osgb_n = 447222.0
+  osgb_e = 534550.0
+  imSize = 50
+  seriesStr = "OS_6in_1st"
+  img, = getFarmImg(seriesStr,osgb_n,osgb_e,imSize)
+  cv2.imwrite("img.png",img)

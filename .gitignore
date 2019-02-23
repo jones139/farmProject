@@ -1,5 +1,8 @@
 *~
 *#
+*.pyc
 VMD
-tileCache
+TileCache
+FarmData
+OpenNames
 
