@@ -22,7 +22,7 @@ def test():
 
 def getFarmMapImgs(csvFname):
     print ("getFarmMapImgs(%s)" % csvFname)
-    imSize = 100
+    imSize = 32
 
     f = open(csvFname, "r")
     reader = csv.reader(f)
@@ -42,6 +42,9 @@ def getFarmMapImgs(csvFname):
         trainFarmDir = os.path.join(TRAINDIR,"farm")
         if (not os.path.exists(trainFarmDir)):
             os.makedirs(trainFarmDir)
+        trainNotFarmDir = os.path.join(TRAINDIR,"notFarm")
+        if (not os.path.exists(trainNotFarmDir)):
+            os.makedirs(trainNotFarmDir)
 
         for seriesStr in ["OS_6in_1st",
                           #"Google",
@@ -53,15 +56,24 @@ def getFarmMapImgs(csvFname):
             farmImgFname = os.path.join(farmDir,"%s_%s.png" % (seriesStr,fbody))
             if (not os.path.exists(farmImgFname)):
                 print("Making Image for map series %s" % seriesStr)
-                img,imgFull = getImg.getFarmImg(seriesStr,osgb_n,osgb_e,imSize)
+                img,imgFull,imgNotFarm = getImg.getFarmImg(
+                    seriesStr,
+                    osgb_n,osgb_e,
+                    imSize)
                 if (img is not None):
                     print("Writing image to directory %s." % farmDir)
                     cv2.imwrite(os.path.join(farmDir,"%s_%s.png" % (seriesStr,fbody)),img)
                     cv2.imwrite(os.path.join(bigDir,"%s_%s.png" % (seriesStr,fbody)),imgFull)
                     if (seriesStr == "OS_6in_1st"):
-                        # Write image to the 'Farm' training directory
-                        cv2.imwrite(os.path.join(trainFarmDir,"%s_%s.png" % (seriesStr,fbody)),img)
-                        # FIXME - write a 'not farm' image too....
+                        # Write image to the 'Farm' training directory, as a binary image
+                        imgray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+                        cv2.imwrite(os.path.join(trainFarmDir,"%s_%s.png"
+                                                 % (seriesStr,fbody)),
+                                    imgray)
+                        imgray = cv2.cvtColor(imgNotFarm,cv2.COLOR_BGR2GRAY)
+                        cv2.imwrite(os.path.join(trainNotFarmDir,"%s_%s.png"
+                                                 % (seriesStr,fbody)),
+                                    imgray)
                 else:
                     print("ERROR Creating Image for series %s" % seriesStr);
             else:
@@ -70,5 +82,5 @@ def getFarmMapImgs(csvFname):
 
 
 
-getFarmMapImgs("farms_NZ.csv")
+getFarmMapImgs("farms_NZ_corr.csv")
 #getFarmMapImgs("test.csv")

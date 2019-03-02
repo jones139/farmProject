@@ -10,6 +10,7 @@ import skimage
 import skimage.io
 import numpy as np
 import time
+import random
 
 #  Hart Mill Farm , 447222.0 , 534550.0
 # 027C806B-3BF0-4D10-B55A-B77337313780 , Hart Mill Farm , 447222.0 , 534550.0
@@ -133,8 +134,11 @@ def getTile(seriesStr,x,y,z):
     path,fname = ntpath.split(fpath)
     if (not os.path.exists(path)):
       os.makedirs(path)
-    print("getTile - downloading tile %s into cache, after delay" % fpath)
-    time.sleep(0.2)
+
+    delaySec = 1.0 * random.random()
+    print("getTile - downloading tile %s into cache, after delay %f"
+          % (fpath,delaySec))
+    time.sleep(delaySec)
     img = downloadTile(seriesStr,x,y,z)
     if (img is not None):
       cv2.imwrite(fpath,img)
@@ -213,9 +217,12 @@ def getFarmImg(seriesStr,osgb_n,osgb_e,imSize):
     #print("Object is at %f N, %f E, which is (%f,%f) deg, or (%d, %d) pixels" % (float(osgb_n), float(osgb_e), lat,lon, ypx, xpx))
     #cv2.imwrite("img_comp.png",img)
     img_cropped = img[(ypx-imSize):(ypx+imSize), (xpx-imSize):(xpx+imSize)]
+    # Make a 'not farm' image of the area to the right of the farm image.
+    img_notFarm = img[(ypx-imSize):(ypx+imSize), (xpx+imSize):(xpx+3*imSize)]
   else:
     img_cropped = None
-  return img_cropped,img
+    img_notFarm = None
+  return img_cropped,img,img_notFarm
 
 
     
