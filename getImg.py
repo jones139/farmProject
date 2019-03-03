@@ -151,6 +151,20 @@ def getTile(seriesStr,x,y,z):
   return img
 
 
+def getCompositeImgRange(seriesStr,x1,y1,x2,y2,z):
+  """ Returns a composite image of all the tiles in the range x1-x2,y1-y2
+  """
+  colArr = [] # array of rows of images
+  for j in range(y1,y2):
+    #print("******ROW***** j=%d" % j)
+    rowArr = []  # horizontal array of images
+    for i in range(x1,x2):
+      #print(i)
+      rowArr.append(getTile(seriesStr, i,j, z))
+    colArr.append(np.hstack(rowArr))
+  img = np.vstack(colArr)
+  return(img)
+
 def getCompositeImg(seriesStr,x,y,z):
   """ Returns a composite image of 9 tiles in a 3x3 matrix, centred
   on x,y at zoom level z.
