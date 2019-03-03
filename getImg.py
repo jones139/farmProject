@@ -11,6 +11,8 @@ import skimage.io
 import numpy as np
 import time
 import random
+import json
+from selenium import webdriver
 
 #  Hart Mill Farm , 447222.0 , 534550.0
 # 027C806B-3BF0-4D10-B55A-B77337313780 , Hart Mill Farm , 447222.0 , 534550.0
@@ -19,10 +21,12 @@ import random
 IMG_EXTRACT_SIZE = 50  # pixels
 CACHEDIR = "/home/graham/Farms/TileCache"
 
+
 # Google info from https://geogeek.xyz/how-to-add-google-maps-layers-in-qgis-3.html
 tileSeries = {
   "OS_6in_1st" : {
-    "url": "https://nls-3.tileserver.com/fpsUZbULUtp1/{0}/{1}/{2}.jpg"
+    "url": "https://nls-3.tileserver.com/fpsUZbULUtp1/{0}/{1}/{2}.jpg",
+    "dates" : "???"
   },
   "OS_1in_7th" : {
     "url": "https://nls-3.tileserver.com/fpsUZbc4ftb2/{0}/{1}/{2}.jpg",
@@ -41,15 +45,28 @@ tileSeries = {
     "dates": "1937-1961"
   },
   "OSM" : {
-    "url": "http://c.tile.openstreetmap.org/{0}/{1}/{2}.png"
+    "url": "http://c.tile.openstreetmap.org/{0}/{1}/{2}.png",
+    "dates" : "Current"
   },
   "Google" : {
-    "url": "https://mt1.google.com/vt/lyrs=r&x={1}&y={2}&z={0}"
+    "url": "https://www.google.com/maps/@?api=1&map_action=map" \
+                                            "&center={1},{2}" \
+                                            "&zoom={0}" \
+                                            "&basemap=map",
+    "dates" : "Current"
   },
   "Google-Satellite" : {
-    "url": "http://www.google.cn/maps/vt?lyrs=s@189&gl=cn&x={1}&y={2}&z={0}"
+    "url": "https://www.google.com/maps/@?api=1&map_action=map" \
+                                            "&center={1},{2}" \
+                                            "&zoom={0}" \
+                                            "&basemap=satellite",
+    "dates" : "Current"
   },
 }
+
+
+
+
 def latlon2tilexy(lat_deg, lon_deg, zoom):
   """
   Based on https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
@@ -84,6 +101,14 @@ def osgb2latlon(osgb_n,osgb_e):
     lon,lat= pyproj.transform(osgb,wgs84,osgb_n,osgb_e);
     return (lon,lat)
 
+def latlon2osgb(lat,lon):
+    osgb = pyproj.Proj(init='epsg:27700')
+    wgs84 = pyproj.Proj(init='epsg:4326')
+    osgb_n,osgb_e= pyproj.transform(wgs84,osgb,lat,lon);
+    return (osgb_n,osgb_e)
+
+
+  
 def getTileUrl(seriesStr,x,y,z):
   if (seriesStr in tileSeries):
     #url = tileSeries[seriesStr]['url'] % (z, x, y)
@@ -100,6 +125,44 @@ def getTileFname(seriesStr,x,y,z):
   fname = os.path.join(CACHEDIR,seriesStr,str(z),str(x),"%d.png" % y)
   return fname
         
+
+def getGoogleApiKey():
+  KEY_FNAME = "GoogleAPI.key"
+  fpath = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        KEY_FNAME)
+  f = open(fpath,"r")
+  apiKey = f.readline()
+  f.close()
+  print("apiKey=%s." % apiKey)
+  return apiKey
+
+
+
+def getGoogleUrl(seriesStr,lon,lat,zoom):
+  if (seriesStr in tileSeries):
+    url = tileSeries[seriesStr]['url'].format(zoom, lat,lon)
+  else:
+    print("Unrecognised Series %s." % seriesStr)
+    url = "error"
+
+  return url
+
+
+def getAddress(lat,lon):
+  """Use the Google reverse geocoding service to get the address
+  of the specified point."""
+  key = getGoogleApiKey()
+  url = "https://maps.googleapis.com/maps/api/geocode/json?latlng={0},{1}&key={2}"
+  url = url.format(lat,lon,key)
+  #print(url)
+  response = urllib2.urlopen(url)
+  responseStr = response.read()
+  responseObj = json.loads(responseStr)
+  #print(responseObj)
+  addrStr = responseObj['results'][0]['formatted_address']
+  parishStr = responseObj['results'][0]['address_components'][2]['long_name']
+  return addrStr,parishStr
 
 def openImg(seriesStr,x,y,z):
   downloadTile(seriesStr,x,y,z)
@@ -221,30 +284,64 @@ def getFarmImg(seriesStr,osgb_n,osgb_e,imSize):
   """ Returns an opencv compatible image of the object at osgb coordinates
   osgb_n, osgb_e, giving an image of size imSize pixels square about the point.
   """
-  z = 16
+  return getFarmImgOsgb(seriesStr,osgb_n,osgb_e,imSize)
+
+
+def getFarmImgOsgb(seriesStr,osgb_n,osgb_e,imSize):
+  """ Returns an opencv compatible image of the object at osgb coordinates
+  osgb_n, osgb_e, giving an image of size imSize pixels square about the point.
+  """
   lon,lat = osgb2latlon(osgb_n, osgb_e)
+  return getFarmImgLatLon(seriesStr,lat,lon,imSize)
+
+def getFarmImgLatLon(seriesStr,lat,lon,imSize):
+  z = 16
   x,y = latlon2tilexy(lat, lon, z)
-  img = getCompositeImg(seriesStr,x,y,z)
 
-  if (img is not None):
-    xpx,ypx = getPixelCoords(lat,lon,x,y,z)
-    #print("Object is at %f N, %f E, which is (%f,%f) deg, or (%d, %d) pixels" % (float(osgb_n), float(osgb_e), lat,lon, ypx, xpx))
-    #cv2.imwrite("img_comp.png",img)
-    img_cropped = img[(ypx-imSize):(ypx+imSize), (xpx-imSize):(xpx+imSize)]
-    # Make a 'not farm' image of the area to the right of the farm image.
-    img_notFarm = img[(ypx-imSize):(ypx+imSize), (xpx+imSize):(xpx+3*imSize)]
+  if (seriesStr!="Google" and seriesStr!="Google-Satellite"):
+    img = getCompositeImg(seriesStr,x,y,z)
+
+    if (img is not None):
+      xpx,ypx = getPixelCoords(lat,lon,x,y,z)
+      img_cropped = img[(ypx-imSize):(ypx+imSize), (xpx-imSize):(xpx+imSize)]
+      # Make a 'not farm' image of the area to the right of the farm image.
+      img_notFarm = img[(ypx-imSize):(ypx+imSize), (xpx+imSize):(xpx+3*imSize)]
+    else:
+      img_cropped = None
+      img_notFarm = None
   else:
-    img_cropped = None
+    # Handle Google Maps, - open a browser and take a screen shot Based on
+    # https://medium.com/@ronnyml/website-screenshot-generator-with-python-593d6ddb56cb
+    webDriver = webdriver.Chrome('chromedriver')
+    webDriver.get(getGoogleUrl(seriesStr,lon,lat,z))
+    # Wait for the website to populate - it takes a while.
+    time.sleep(10)
+    tmpFname = '/tmp/google.png'
+    webDriver.save_screenshot(tmpFname)
+    img = cv2.imread(tmpFname,cv2.IMREAD_UNCHANGED)
+    ypx = int(img.shape[0]/2)
+    xpx = int(img.shape[1]/2)
+    img_cropped = img[(ypx-imSize):(ypx+imSize), (xpx-imSize):(xpx+imSize)]
     img_notFarm = None
+    #driver.quit()
+    
   return img_cropped,img,img_notFarm
-
 
     
 if (__name__ == "__main__"):
   zoom = 16
-  lon,lat = osgb2latlon(447222.0 , 534550.0)
-  #print lon,lat
-  #print("https://www.openstreetmap.org/?mlat=%f&mlon=%f#map=17/%f/%f" % (lat,lon,lat,lon))
+  osgb_n = 447222.0
+  osgb_e = 534550.0
+  lon = 0
+  lat = 0
+  print osgb_n,osgb_e, lon,lat
+  lon,lat = osgb2latlon(osgb_n,osgb_e)
+  print osgb_n,osgb_e, lon,lat
+  osgb_n,osgb_e = latlon2osgb(lon,lat)
+  print osgb_n,osgb_e, lon,lat
+  lon,lat = osgb2latlon(osgb_n,osgb_e)
+  print osgb_n,osgb_e, lon,lat
+    #print("https://www.openstreetmap.org/?mlat=%f&mlon=%f#map=17/%f/%f" % (lat,lon,lat,lon))
 
   x,y = latlon2tilexy(lat,lon, zoom)
 
@@ -264,5 +361,8 @@ if (__name__ == "__main__"):
   osgb_e = 534550.0
   imSize = 50
   seriesStr = "OS_6in_1st"
-  img,img_big = getFarmImg(seriesStr,osgb_n,osgb_e,imSize)
+  img,img_big,notFarm = getFarmImg(seriesStr,osgb_n,osgb_e,imSize)
   cv2.imwrite("img.png",img)
+
+
+  print(getAddress(54.53872,-1.41799))
